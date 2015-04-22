@@ -1,0 +1,162 @@
+#This code processes maf files, runs bedtools functions, and graphs using matplotlib
+import numpy as np
+import argparse 
+import csv 
+import pybedtools
+import os
+import brewer2mpl
+import pandas as pd
+import matplotlib.pyplot as pl
+
+#arguments
+parser = argparse.ArgumentParser()
+parser.add_argument('file1',help='input maf/bed file')
+parser.add_argument('file2',help='input maf/bed file')
+parser.add_argument('-i','--intersect',help='intersect two files', action='store_true')
+parser.add_argument('-s','--subtract',help='subtract two files from each other', action='store_true')
+parser.add_argument('-c', '--cellline',help='intersect, view by cell line', action='store_true')
+args = parser.parse_args()
+
+
+#functions
+def maf_edit(file): 
+	os.system(''' awk '(NR > 2) {print "chr" $5, $6 -1, $7, $0;}' OFS="\t" ''' + file + ">temp1.bed")
+	tempfile = open("temp1.bed",'r') 
+	reader = csv.reader(tempfile, dialect = 'excel-tab')
+	makebed = open(file[:-4]+".bed", 'w')
+	writer = csv.writer(makebed, delimiter='\t')
+	for row in reader:
+		if 'chrGL' not in row[0]:
+			writer.writerow(row)
+	bed = file[:-4]+".bed"
+	return bed
+
+def bedtool_int(file1,file2):
+	a = pybedtools.BedTool(file1)
+	a.intersect(file2, output=file1[:-4]+"_"+file2[:-4]+"_intersect.bed")
+	output = file1[:-4]+"_"+file2[:-4]+"_intersect.bed"
+	return output
+
+
+def bedtool_sub(file1,file2):
+	a = pybedtools.BedTool(file1)
+	a.subtract(file2, output=file1[:-4]+"_"+file2[:-4]+"_subtract.bed")
+	output = file1[:-4]+"_"+file2[:-4]+"_subtract.bed"
+	return output
+
+def bed_merge(file1):	
+	a = pybedtools.BedTool(file1)
+	b= a.sort()
+	b.merge(output=file1[:-4]+"_bedmerge.bed")
+	output = file1[:-4]+"_bedmerge.bed"
+	return output
+
+def merge_bg(file1):
+	os.system("cat " + file1 + '''| awk '{print $1, $4}'  OFS="\t" | sort | uniq -c | sed -e 's/^ *//;s/ /	/' | sort -g -r >'''+file1[:-4]+"_merge_bg.bed")
+	return file1[:-4]+"_merge_bg.bed"
+
+def merge_cbg(file1):
+	file = open(file1, 'r')
+	reader = csv.reader(file, dialect ='excel-tab')
+	tempfile = open("temp1.bed","w")
+	writer = csv.writer(tempfile, delimiter='\n')
+	a = []
+	for row in reader:
+		a.append(row[18])
+	writer.writerow(a)
+	os.system("cat temp1.bed" + '''| awk '{print $1}'| sort | uniq -c | sed -e 's/^ *//;s/ /	/' |sort -g -r >'''+file1[:-4]+"_merge_cbg.bed")
+	return file1[:-4]+"_merge_cbg.bed"
+	
+def merge_hm(file1):
+	file = open(file1, 'r')
+	reader = csv.reader(file, dialect ='excel-tab')
+	tempfile = open("temp1.bed","w")
+	writer = csv.writer(tempfile, delimiter='\t')
+	a = []
+	b= []
+	for row in reader:
+		a.append(row[18])
+		b.append(row[3])
+	writer.writerows(zip(a,b))
+	os.system("cat temp1.bed" + '''| awk '{print $1, $2}'  OFS="\t" | sort | uniq -c | sed -e 's/^ *//;s/ /	/' | sort -g -r >'''+file1[:-4]+"_merge_hm.bed")
+	return file1[:-4]+"_merge_hm.bed"
+
+#bed_merge(args.file1)
+
+#print merge_cbg((args.file1))
+
+
+
+
+	
+def check(file1):
+	suffix = '.maf'
+	suffix1 = '.bed'
+	if file1.endswith(suffix):
+		return maf_edit(file1)
+	elif file1.endswith(suffix1):
+		return file1
+	else:
+		return False 
+
+
+def bar_graph(file1):
+	fig = pl.figure()
+	ax = fig.add_subplot(111)
+	data = open(file1, 'rb')
+	reader = csv.reader(data, delimiter='	')
+	count= []
+	chr = []
+	gene = []
+	for i in reader:
+		count.append(int(i[0]))
+		chr.append(i[1])
+		gene.append(i[2])
+	n_groups = len(count)
+	index = np.arange(n_groups)
+	bar_width = 0.50
+	rects1 = pl.bar(index, count, bar_width, color='b', label='TCGA')
+	ax.set_xticks(index+bar_width)
+	ax.set_xticklabels(gene)
+	ax.set_title(file1)
+	pl.show()
+
+def cbar_graph(file1):
+	fig = pl.figure()
+	ax = fig.add_subplot(111)
+	data = open(file1, 'rb')
+	reader = csv.reader(data, delimiter='	')
+	count= []
+	cl = []
+	for i in reader:
+		count.append(int(i[0]))
+		cl.append(i[1])
+	n_groups = len(count)
+	index = np.arange(n_groups)
+	bar_width = 0.50
+	rects1 = pl.bar(index, count, bar_width, color='b', label='TCGA')
+	ax.set_xticks(index+bar_width)
+	ax.set_xticklabels(cl)
+	ax.set_title(file1)
+	pl.show()
+	
+#check files
+File1 = check(args.file1)
+if check(args.file1) == False:
+	print 'Argument 1 is not .maf or .bed format'
+	
+File2 = check(args.file2)
+if check(args.file2) == False:
+	print 'Argument 2 is not .maf or .bed format'
+
+
+
+#using bedtools	
+if File1 and File2 != False:
+	if args.intersect: 
+		bar_graph(merge_bg(bedtool_int(File1,bed_merge(File2))))
+	if args.subtract:
+		unique_1 = bar_graph(merge_bg(bedtool_sub((File1),bed_merge(File2))))
+		unique_2 = bar_graph(merge_bg(bedtool_sub((File2),bed_merge(File1))))
+	if args.cellline:
+		cbar_graph(merge_cbg(bedtool_int(File1, bed_merge(File2))))
